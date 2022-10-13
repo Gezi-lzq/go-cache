@@ -3,12 +3,19 @@ package geecache
 
 import (
 	"fmt"
+	"geecache/consistenthash"
+	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync"
 )
 
-const defaultBasePath = "/_geecache/"
+const (
+	defaultBasePath = "/_geecache/"
+	defaultReplicas = 50
+)
 
 // 承载节点间HTTP通信的核心数据结构
 type HTTPPool struct {
@@ -16,7 +23,45 @@ type HTTPPool struct {
 	self string
 	// basePath 作为节点间通讯的前缀 默认是/_geecache/
 	basePath string
+	// 为 HTTPPool 添加节点选择的功能
+	mu sync.Mutex
+	// 用来根据key选择节点
+	peers *consistenthash.Map
+	// 映射远程节点对应的httpGetter
+	httpGetters map[string]*httpGetter
 }
+
+type httpGetter struct {
+	baseURL string
+}
+
+func (h *httpGetter) Get(group string, key string) ([]byte, error) {
+	u := fmt.Sprintf(
+		"%v%v%v",
+		h.baseURL,
+		url.QueryEscape(group),
+		url.QueryEscape(key),
+	)
+	res, err := http.Get(u)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("server returned: %v", res)
+	}
+
+	bytes, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading response body: %v", err)
+	}
+
+	return bytes, nil
+}
+
+// 确认httpGetter已经实现了PeerGetter接口中的Get方法
+var _ PeerGetter = (*httpGetter)(nil)
 
 // NewHTTPPool initializes an HTTP pool of peers.
 func NewHTTPPool(self string) *HTTPPool {
@@ -65,4 +110,29 @@ func (p *HTTPPool) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// 使用 w.Write() 将缓存值作为 httpResponse 的 body 返回
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Write(view.ByteSlice())
+}
+
+// Set()方法实例化了一致性哈希算法,并添加了传入的节点
+func (p *HTTPPool) Set(peers ...string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.peers = consistenthash.New(defaultReplicas, nil)
+	p.peers.Add(peers...)
+	// 为每个节点创建一个HTTP客户端httpGetter
+	p.httpGetters = make(map[string]*httpGetter, len(peers))
+	for _, peer := range peers {
+		p.httpGetters[peer] = &httpGetter{baseURL: peer + p.basePath}
+	}
+}
+
+// PickerPeer() 包装了一致性哈希算法的 Get() 方法
+// 根据具体的 key，选择节点，返回节点对应的 HTTP 客户端
+func (p *HTTPPool) PickPeer(key string) (PeerGetter, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if peer := p.peers.Get(key); peer != "" && peer != p.self {
+		p.Log("Pick peer %s", peer)
+		return p.httpGetters[peer], true
+	}
+	return nil, false
 }

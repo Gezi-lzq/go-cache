@@ -69,6 +69,7 @@ func (m *Map) Get(key string) string {
 	idx := sort.Search(len(m.keys), func(i int) bool {
 		return m.keys[i] >= hash
 	})
+	// 如果 idx == len(m.keys)，说明应选择 m.keys[0].
 	// m.keys是一个环形结构 所以用取余数的方式来处理这种情况
 	// 通过hashMap 获得从虚拟节点对应的真实节点
 	return m.hashMap[m.keys[idx%len(m.keys)]]
