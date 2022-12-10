@@ -15,3 +15,5 @@
 - 服务发现与注册中心
 
 [相关笔记](https://gezi-lzq.github.io/wiki/#%E5%AE%9E%E7%8E%B0%E5%88%86%E5%B8%83%E5%BC%8F%E7%BC%93%E5%AD%98:%E5%AE%9E%E7%8E%B0%E5%88%86%E5%B8%83%E5%BC%8F%E7%BC%93%E5%AD%98%20Index%20%E7%AC%94%E8%AE%B0)
+
+![绘制](/assert/design.png)
